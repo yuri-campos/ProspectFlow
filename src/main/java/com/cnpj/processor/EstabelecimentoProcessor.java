@@ -14,13 +14,17 @@ import java.util.zip.ZipInputStream;
 
 /**
  * Lê e filtra os arquivos de ESTABELECIMENTOS e EMPRESAS dos Dados Abertos
- * da Receita Federal, montando objetos {@link Empresa} com dados da última semana.
+ * da Receita Federal, montando objetos {@link Empresa} com perfil de alto
+ * potencial para compra de soluções de análise de crédito.
  *
- * Estratégia de dois passos para evitar OutOfMemoryError:
- *   1. Varre os Estabelecimentos e coleta apenas os CNPJ básicos que passam
- *      nos filtros (data, telefone, e-mail). Resultado: poucos milhares de CNPJs.
- *   2. Varre os Empresas e carrega razões sociais APENAS desses CNPJs.
- *   3. Varre os Estabelecimentos novamente montando os objetos Empresa finais.
+ * Filtros aplicados:
+ *  - Data de início de atividade nos últimos 30 dias
+ *  - Situação cadastral = Ativa (02)
+ *  - Apenas Matrizes (identificador = 1)
+ *  - CNAE principal em divisões relevantes (financeiro, varejo, atacado, imobiliário, locação)
+ *  - Telefone e e-mail obrigatórios
+ *  - UF diferente de RS e PR
+ *  - Excluir MEI (natureza jurídica 2135)
  */
 public class EstabelecimentoProcessor {
 
@@ -34,63 +38,102 @@ public class EstabelecimentoProcessor {
     private static final int EST_CNPJ_BASICO   = 0;
     private static final int EST_CNPJ_ORDEM    = 1;
     private static final int EST_CNPJ_DV       = 2;
+    private static final int EST_MATRIZ_FILIAL = 3;
     private static final int EST_SITUACAO      = 5;
     private static final int EST_DATA_INICIO   = 10;
+    private static final int EST_CNAE_PRINC    = 11;
     private static final int EST_DDD1          = 21;
     private static final int EST_TEL1          = 22;
     private static final int EST_DDD2          = 23;
     private static final int EST_TEL2          = 24;
     private static final int EST_EMAIL         = 27;
+    private static final int EST_UF            = 19;
     private static final int EST_TOTAL_COLUNAS = 30;
 
     // ── índices EMPRESAS ─────────────────────────────────────────────────────
-    private static final int EMP_CNPJ_BASICO  = 0;
-    private static final int EMP_RAZAO_SOCIAL = 1;
+    private static final int EMP_CNPJ_BASICO       = 0;
+    private static final int EMP_RAZAO_SOCIAL       = 1;
+    private static final int EMP_NATUREZA_JURIDICA  = 2;
+
+    // ── Filtros de negócio ────────────────────────────────────────────────────
+
+    /** UFs excluídas da prospecção. */
+    private static final Set<String> UFS_EXCLUIDAS = new HashSet<>(Arrays.asList("RS", "PR"));
+
+    /** Natureza jurídica do MEI — excluir por baixo potencial comercial. */
+    private static final String NATUREZA_MEI = "2135";
+
+    /** Situação cadastral Ativa. */
+    private static final String SITUACAO_ATIVA = "02";
+
+    /** Identificador de Matriz. */
+    private static final String MATRIZ = "1";
+
+    /**
+     * Divisões CNAE (primeiros 2 dígitos) com alto potencial de contratar
+     * soluções de análise de crédito:
+     *
+     *  45 – Comércio e reparação de veículos (vende a prazo)
+     *  46 – Comércio atacadista (crédito B2B)
+     *  47 – Comércio varejista (vende a prazo ao consumidor)
+     *  64 – Serviços financeiros (bancos, financeiras, cooperativas, fintechs)
+     *  65 – Seguros e previdência
+     *  66 – Atividades auxiliares financeiras (factoring, securitizadoras)
+     *  68 – Atividades imobiliárias (financiamento de imóveis)
+     *  77 – Locação de veículos e equipamentos (crédito ao locatário)
+     */
+    private static final Set<String> DIVISOES_CNAE_ALVO = new HashSet<>(Arrays.asList(
+            "45", "46", "47", "64", "65", "66", "68", "77"
+    ));
 
     // ─────────────────────────────────────────────────────────────────────────
 
     public List<Empresa> processar(String dirTemp) throws IOException {
 
         File dir = new File(dirTemp);
-
-        File[] empresasZips = listarZips(dir, "Empresas");
+        File[] empresasZips        = listarZips(dir, "Empresas");
         File[] estabelecimentosZips = listarZips(dir, "Estabelecimentos");
 
         LocalDate hoje   = LocalDate.now();
         LocalDate limite = hoje.minusDays(30);
         LOG.info(String.format("Janela de filtro: %s a %s", limite, hoje));
 
-        // ── PASSO 1: coletar CNPJ básicos que passam nos filtros ──────────────
+        // ── PASSO 1: coletar CNPJ básicos candidatos ──────────────────────────
         LOG.info("Passo 1/3: coletando CNPJ básicos candidatos...");
-        Set<String> cnpjsBasicosCandidatos = new HashSet<>();
+        Set<String> candidatos = new HashSet<>();
         for (File zip : estabelecimentosZips) {
             LOG.info("  Varrendo: " + zip.getName());
-            cnpjsBasicosCandidatos.addAll(coletarCnpjsBasicos(zip, limite, hoje));
+            candidatos.addAll(coletarCnpjsBasicos(zip, limite, hoje));
         }
-        LOG.info(String.format("  → %,d CNPJ(s) básico(s) candidatos.", cnpjsBasicosCandidatos.size()));
+        LOG.info(String.format("  → %,d CNPJ(s) básico(s) candidatos.", candidatos.size()));
 
-        if (cnpjsBasicosCandidatos.isEmpty()) {
+        if (candidatos.isEmpty()) {
             LOG.info("Nenhum candidato encontrado. Encerrando.");
             return Collections.emptyList();
         }
 
-        // ── PASSO 2: carregar razões sociais só dos candidatos ────────────────
-        LOG.info("Passo 2/3: carregando razões sociais dos candidatos...");
-        Map<String, String> razoesSociais = new HashMap<>(cnpjsBasicosCandidatos.size() * 2);
+        // ── PASSO 2: carregar razões sociais e identificar MEIs ───────────────
+        LOG.info("Passo 2/3: carregando razões sociais e filtrando MEIs...");
+        Map<String, String> razoesSociais = new HashMap<>(candidatos.size() * 2);
+        Set<String> cnpjsMei = new HashSet<>();
+
         for (File zip : empresasZips) {
             LOG.info("  Lendo: " + zip.getName());
-            carregarRazoesSociais(zip, cnpjsBasicosCandidatos, razoesSociais);
-            // Se já encontrou todos, interrompe cedo
-            if (razoesSociais.size() >= cnpjsBasicosCandidatos.size()) break;
+            carregarRazoesSociais(zip, candidatos, razoesSociais, cnpjsMei);
+            if (razoesSociais.size() + cnpjsMei.size() >= candidatos.size()) break;
         }
-        LOG.info(String.format("  → %,d razão(ões) social(is) carregada(s).", razoesSociais.size()));
 
-        // ── PASSO 3: montar os objetos Empresa ────────────────────────────────
+        // Remove MEIs do conjunto de candidatos
+        candidatos.removeAll(cnpjsMei);
+        LOG.info(String.format("  → %,d razão(ões) social(is) | %,d MEI(s) excluído(s).",
+                razoesSociais.size(), cnpjsMei.size()));
+
+        // ── PASSO 3: montar objetos Empresa ───────────────────────────────────
         LOG.info("Passo 3/3: montando registros finais...");
         List<Empresa> resultado = new ArrayList<>();
         for (File zip : estabelecimentosZips) {
             LOG.info("  Processando: " + zip.getName());
-            resultado.addAll(filtrarEstabelecimentos(zip, limite, hoje, razoesSociais));
+            resultado.addAll(filtrarEstabelecimentos(zip, limite, hoje, razoesSociais, candidatos));
         }
         LOG.info(String.format("  → %,d empresa(s) selecionada(s).", resultado.size()));
 
@@ -112,14 +155,30 @@ public class EstabelecimentoProcessor {
                 String[] c = linha.split(SEPARADOR, -1);
                 if (c.length < EST_TOTAL_COLUNAS) continue;
 
+                // Filtro: data de início
                 LocalDate dataInicio = parsarData(limpar(c[EST_DATA_INICIO]));
                 if (dataInicio == null || dataInicio.isBefore(limite) || dataInicio.isAfter(hoje)) continue;
 
+                // Filtro: situação ativa
+                if (!SITUACAO_ATIVA.equals(limpar(c[EST_SITUACAO]))) continue;
+
+                // Filtro: apenas matrizes
+                if (!MATRIZ.equals(limpar(c[EST_MATRIZ_FILIAL]))) continue;
+
+                // Filtro: UF não excluída
+                if (UFS_EXCLUIDAS.contains(limpar(c[EST_UF]))) continue;
+
+                // Filtro: CNAE alvo
+                String cnae = limpar(c[EST_CNAE_PRINC]);
+                if (cnae.length() < 2 || !DIVISOES_CNAE_ALVO.contains(cnae.substring(0, 2))) continue;
+
+                // Filtro: telefone obrigatório
                 String telefone = montarTelefone(
                         limpar(c[EST_DDD1]), limpar(c[EST_TEL1]),
                         limpar(c[EST_DDD2]), limpar(c[EST_TEL2]));
                 if (telefone.isEmpty()) continue;
 
+                // Filtro: e-mail obrigatório
                 if (limpar(c[EST_EMAIL]).isEmpty()) continue;
 
                 cnpjs.add(limpar(c[EST_CNPJ_BASICO]));
@@ -129,11 +188,12 @@ public class EstabelecimentoProcessor {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // Passo 2: carregar razões sociais só dos candidatos
+    // Passo 2: carregar razões sociais e identificar MEIs
     // ─────────────────────────────────────────────────────────────────────────
 
     private void carregarRazoesSociais(File zipEmpresas, Set<String> candidatos,
-                                       Map<String, String> destino) throws IOException {
+                                       Map<String, String> destino,
+                                       Set<String> cnpjsMei) throws IOException {
 
         try (ZipInputStream zis = abrirZip(zipEmpresas);
              BufferedReader br  = new BufferedReader(new InputStreamReader(zis, CHARSET), 1 << 16)) {
@@ -141,10 +201,15 @@ public class EstabelecimentoProcessor {
             String linha;
             while ((linha = br.readLine()) != null) {
                 String[] campos = linha.split(SEPARADOR, -1);
-                if (campos.length <= EMP_RAZAO_SOCIAL) continue;
+                if (campos.length <= EMP_NATUREZA_JURIDICA) continue;
 
                 String cnpjBasico = limpar(campos[EMP_CNPJ_BASICO]);
-                if (candidatos.contains(cnpjBasico)) {
+                if (!candidatos.contains(cnpjBasico)) continue;
+
+                // Filtro: excluir MEI
+                if (NATUREZA_MEI.equals(limpar(campos[EMP_NATUREZA_JURIDICA]))) {
+                    cnpjsMei.add(cnpjBasico);
+                } else {
                     destino.put(cnpjBasico, limpar(campos[EMP_RAZAO_SOCIAL]));
                 }
             }
@@ -156,7 +221,8 @@ public class EstabelecimentoProcessor {
     // ─────────────────────────────────────────────────────────────────────────
 
     private List<Empresa> filtrarEstabelecimentos(File zip, LocalDate limite, LocalDate hoje,
-                                                  Map<String, String> razoesSociais) throws IOException {
+                                                  Map<String, String> razoesSociais,
+                                                  Set<String> candidatosValidos) throws IOException {
         List<Empresa> empresas = new ArrayList<>();
 
         try (ZipInputStream zis = abrirZip(zip);
@@ -167,8 +233,20 @@ public class EstabelecimentoProcessor {
                 String[] c = linha.split(SEPARADOR, -1);
                 if (c.length < EST_TOTAL_COLUNAS) continue;
 
+                String cnpjBasico = limpar(c[EST_CNPJ_BASICO]);
+
+                // Só processa CNPJs que sobreviveram a todos os filtros
+                if (!candidatosValidos.contains(cnpjBasico)) continue;
+
                 LocalDate dataInicio = parsarData(limpar(c[EST_DATA_INICIO]));
                 if (dataInicio == null || dataInicio.isBefore(limite) || dataInicio.isAfter(hoje)) continue;
+
+                if (!SITUACAO_ATIVA.equals(limpar(c[EST_SITUACAO]))) continue;
+                if (!MATRIZ.equals(limpar(c[EST_MATRIZ_FILIAL]))) continue;
+                if (UFS_EXCLUIDAS.contains(limpar(c[EST_UF]))) continue;
+
+                String cnae = limpar(c[EST_CNAE_PRINC]);
+                if (cnae.length() < 2 || !DIVISOES_CNAE_ALVO.contains(cnae.substring(0, 2))) continue;
 
                 String telefone = montarTelefone(
                         limpar(c[EST_DDD1]), limpar(c[EST_TEL1]),
@@ -178,7 +256,6 @@ public class EstabelecimentoProcessor {
                 String email = limpar(c[EST_EMAIL]);
                 if (email.isEmpty()) continue;
 
-                String cnpjBasico = limpar(c[EST_CNPJ_BASICO]);
                 String cnpj = montarCnpj(cnpjBasico, limpar(c[EST_CNPJ_ORDEM]), limpar(c[EST_CNPJ_DV]));
 
                 Empresa empresa = new Empresa();
