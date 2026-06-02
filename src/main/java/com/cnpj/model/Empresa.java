@@ -12,6 +12,7 @@ public class Empresa {
     private String    telefone;
     private String    email;
     private LocalDate dataAbertura;
+    private String    situacaoCadastral;
 
     // -----------------------------------------------------------------------
     // Construtores
@@ -21,11 +22,12 @@ public class Empresa {
 
     public Empresa(String cnpj, String razaoSocial, String telefone,
                    String email, LocalDate dataAbertura) {
-        this.cnpj         = cnpj;
-        this.razaoSocial  = razaoSocial;
-        this.telefone     = telefone;
-        this.email        = email;
-        this.dataAbertura = dataAbertura;
+        this.cnpj              = cnpj;
+        this.razaoSocial       = razaoSocial;
+        this.telefone          = telefone;
+        this.email             = email;
+        this.dataAbertura      = dataAbertura;
+        this.situacaoCadastral = "";
     }
 
     // -----------------------------------------------------------------------
@@ -70,6 +72,14 @@ public class Empresa {
 
     public void setDataAbertura(LocalDate dataAbertura) {
         this.dataAbertura = dataAbertura;
+    }
+
+    public String getSituacaoCadastral() {
+        return situacaoCadastral;
+    }
+
+    public void setSituacaoCadastral(String situacaoCadastral) {
+        this.situacaoCadastral = situacaoCadastral;
     }
 
     // -----------------------------------------------------------------------

@@ -1,0 +1,6 @@
+com\cnpj\Main.class
+com\cnpj\downloader\ReceitaDownloader.class
+com\cnpj\processor\EstabelecimentoProcessor.class
+com\cnpj\deduplicator\Deduplicator.class
+com\cnpj\exporter\ExcelExporter.class
+com\cnpj\model\Empresa.class

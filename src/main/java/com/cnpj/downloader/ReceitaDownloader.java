@@ -4,175 +4,155 @@ import java.io.*;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.file.*;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.zip.ZipEntry;
-import java.util.zip.ZipInputStream;
+import java.time.YearMonth;
+import java.time.format.DateTimeFormatter;
+import java.util.Base64;
+import java.util.logging.Logger;
 
 /**
- * Responsável por baixar e descompactar os arquivos públicos da Receita Federal.
+ * Baixa os arquivos ZIP dos Dados Abertos de CNPJ da Receita Federal.
  *
- * Fonte: https://dadosabertos.rfb.gov.br/CNPJ/
+ * Nova URL (desde jan/2026): https://arquivos.receitafederal.gov.br/public.php/webdav/{YYYY-MM}/
+ * Autenticação: Basic Auth com o token público como usuário e senha vazia.
  *
- * A base é dividida em múltiplos ZIPs numerados (0 a 9) para Empresas e Estabelecimentos.
- * Todos os arquivos são baixados, descompactados em /tmp/ e os ZIPs deletados em seguida.
+ * Token público permanente: YggdBLfdninEJX9
  */
 public class ReceitaDownloader {
 
-    /**
-     * SUPOSIÇÃO 1: A URL base não muda entre execuções semanais.
-     * Se a Receita Federal alterar o endpoint, basta atualizar esta constante.
-     */
-    private static final String URL_BASE = "https://dadosabertos.rfb.gov.br/CNPJ/";
+    private static final Logger LOG = Logger.getLogger(ReceitaDownloader.class.getName());
 
-    /**
-     * SUPOSIÇÃO 2: Os arquivos seguem o padrão de nomenclatura
-     * "Empresas{N}.zip" e "Estabelecimentos{N}.zip", onde N vai de 0 a 9.
-     * Se a Receita mudar o padrão de nome, ajuste os prefixos abaixo.
-     */
+    private static final String BASE_URL    = "https://arquivos.receitafederal.gov.br/public.php/webdav/";
+    private static final String SHARE_TOKEN = "YggdBLfdninEJX9";
+
     private static final String PREFIXO_EMPRESAS         = "Empresas";
     private static final String PREFIXO_ESTABELECIMENTOS = "Estabelecimentos";
     private static final int    INDICE_INICIAL            = 0;
     private static final int    INDICE_FINAL              = 9;
 
-    /**
-     * SUPOSIÇÃO 3: /tmp/ é gravável no ambiente de execução (Linux/GitHub Actions).
-     * Em Windows local, substitua por System.getProperty("java.io.tmpdir").
-     */
-    private static final String DIR_TMP = "/tmp/cnpj/";
+    private static final String DIR_TMP  = System.getProperty("java.io.tmpdir") + "/cnpj/";
+    private static final int    TIMEOUT_MS = 120_000; // 2 min — arquivos pesados
+
+    // ─────────────────────────────────────────────────────────────────────────
 
     /**
-     * SUPOSIÇÃO 4: Timeout de 60 segundos para conexão e leitura é suficiente.
-     * Os arquivos da Receita podem ser grandes; ajuste se houver timeout frequente.
-     */
-    private static final int TIMEOUT_MS = 60_000;
-
-    /**
-     * Executa o fluxo completo: download + descompactação + limpeza dos ZIPs.
-     * Chamado pelo Main.java como downloader.baixar().
-     *
-     * @throws RuntimeException se qualquer download ou descompactação falhar.
+     * Executa o fluxo completo: descobre a pasta do mês mais recente disponível,
+     * baixa todos os ZIPs de Empresas e Estabelecimentos.
      */
     public void baixar() {
         criarDiretorioTemp();
 
-        List<String> prefixos = List.of(PREFIXO_EMPRESAS, PREFIXO_ESTABELECIMENTOS);
+        String mesRecente = descobrirMesRecente();
+        LOG.info("Mês mais recente disponível: " + mesRecente);
+        System.out.println("  Usando base de dados de: " + mesRecente);
 
-        for (String prefixo : prefixos) {
+        String urlMes = BASE_URL + mesRecente + "/";
+
+        for (String prefixo : new String[]{PREFIXO_EMPRESAS, PREFIXO_ESTABELECIMENTOS}) {
             for (int i = INDICE_INICIAL; i <= INDICE_FINAL; i++) {
                 String nomeArquivo = prefixo + i + ".zip";
-                String urlCompleta = URL_BASE + nomeArquivo;
+                String urlCompleta = urlMes + nomeArquivo;
                 Path   destino     = Path.of(DIR_TMP + nomeArquivo);
 
-                System.out.println("  Baixando: " + urlCompleta);
+                if (Files.exists(destino) && destino.toFile().length() > 0) {
+                    System.out.println("  Já existe, pulando: " + nomeArquivo);
+                    continue;
+                }
+                System.out.println("  Baixando: " + nomeArquivo);
                 baixarArquivo(urlCompleta, destino);
-
-                System.out.println("  Descompactando: " + nomeArquivo);
-                descompactar(destino);
-
-                System.out.println("  Deletando ZIP: " + nomeArquivo);
-                deletarArquivo(destino);
+                System.out.println("  OK: " + nomeArquivo);
             }
         }
     }
 
-    /**
-     * Retorna o diretório temporário onde os arquivos descompactados ficam salvos.
-     * Usado pelo EstabelecimentoProcessor para localizar os CSVs extraídos.
-     *
-     * SUPOSIÇÃO 5: O Processor vai chamar getDirTemp() para saber onde ler os arquivos.
-     * Se preferir um caminho fixo no Processor, este método pode ser removido.
-     */
     public String getDirTemp() {
         return DIR_TMP;
     }
 
-    // -----------------------------------------------------------------------
-    // Métodos privados
-    // -----------------------------------------------------------------------
+    // ─────────────────────────────────────────────────────────────────────────
+    // Descoberta dinâmica do mês mais recente via WebDAV
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Consulta o WebDAV raiz e retorna a pasta do mês mais recente no formato YYYY-MM.
+     * Tenta os últimos 3 meses retroativamente caso o mês atual ainda não esteja publicado.
+     */
+    private String descobrirMesRecente() {
+        YearMonth mes = YearMonth.now();
+        DateTimeFormatter fmt = DateTimeFormatter.ofPattern("yyyy-MM");
+
+        for (int tentativa = 0; tentativa < 4; tentativa++) {
+            String candidato = mes.minusMonths(tentativa).format(fmt);
+            if (pastaExiste(candidato)) {
+                return candidato;
+            }
+            LOG.info("Pasta " + candidato + " não encontrada, tentando mês anterior...");
+        }
+
+        throw new RuntimeException("Nenhuma pasta de dados encontrada nos últimos 4 meses. Verifique o repositório.");
+    }
+
+    private boolean pastaExiste(String anoMes) {
+        try {
+            String urlStr = BASE_URL + anoMes + "/";
+            HttpURLConnection conn = abrirConexao(urlStr, "HEAD");
+            int status = conn.getResponseCode();
+            conn.disconnect();
+            return status == 200 || status == 207;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Download
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private void baixarArquivo(String urlStr, Path destino) {
+        try {
+            HttpURLConnection conn = abrirConexao(urlStr, "GET");
+            int status = conn.getResponseCode();
+
+            if (status != HttpURLConnection.HTTP_OK) {
+                throw new RuntimeException("HTTP " + status + " ao baixar: " + urlStr);
+            }
+
+            try (InputStream in  = conn.getInputStream();
+                 OutputStream out = Files.newOutputStream(destino)) {
+                in.transferTo(out);
+            }
+
+            conn.disconnect();
+
+        } catch (IOException e) {
+            throw new RuntimeException("Erro ao baixar: " + urlStr, e);
+        }
+    }
+
+    /**
+     * Abre uma conexão HTTP com Basic Auth usando o token público da Receita.
+     * Usuário = token, senha = vazia (padrão do Nextcloud/SERPRO+).
+     */
+    private HttpURLConnection abrirConexao(String urlStr, String method) throws IOException {
+        URL url = new URL(urlStr);
+        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+        conn.setRequestMethod(method);
+        conn.setConnectTimeout(TIMEOUT_MS);
+        conn.setReadTimeout(TIMEOUT_MS);
+
+        String credencial = SHARE_TOKEN + ":";
+        String auth = "Basic " + Base64.getEncoder().encodeToString(credencial.getBytes());
+        conn.setRequestProperty("Authorization", auth);
+        conn.setRequestProperty("User-Agent", "Mozilla/5.0");
+
+        return conn;
+    }
 
     private void criarDiretorioTemp() {
         try {
             Files.createDirectories(Path.of(DIR_TMP));
+            LOG.info("Diretório temporário: " + DIR_TMP);
         } catch (IOException e) {
             throw new RuntimeException("Não foi possível criar o diretório temporário: " + DIR_TMP, e);
-        }
-    }
-
-    /**
-     * Faz o download de uma URL para um arquivo local via HttpURLConnection.
-     *
-     * SUPOSIÇÃO 6: O servidor da Receita não exige autenticação nem headers especiais.
-     * Se passar a exigir User-Agent ou token, adicione connection.setRequestProperty() aqui.
-     */
-    private void baixarArquivo(String urlStr, Path destino) {
-        try {
-            URL url = new URL(urlStr);
-            HttpURLConnection connection = (HttpURLConnection) url.openConnection();
-            connection.setConnectTimeout(TIMEOUT_MS);
-            connection.setReadTimeout(TIMEOUT_MS);
-
-            int status = connection.getResponseCode();
-            if (status != HttpURLConnection.HTTP_OK) {
-                throw new RuntimeException("Falha ao baixar " + urlStr + " — HTTP " + status);
-            }
-
-            try (InputStream in  = connection.getInputStream();
-                 OutputStream out = Files.newOutputStream(destino)) {
-
-                in.transferTo(out);
-            }
-
-        } catch (IOException e) {
-            throw new RuntimeException("Erro ao baixar arquivo: " + urlStr, e);
-        }
-    }
-
-    /**
-     * Descompacta um ZIP para o mesmo diretório (DIR_TMP) usando ZipInputStream nativo.
-     *
-     * SUPOSIÇÃO 7: Cada ZIP contém um único arquivo CSV (ou poucos arquivos).
-     * Se houver subdiretórios dentro do ZIP, eles serão criados automaticamente.
-     *
-     * SUPOSIÇÃO 8: A codificação dos nomes de entrada no ZIP é UTF-8.
-     * Se aparecerem nomes corrompidos, tente new ZipInputStream(in, Charset.forName("CP437")).
-     */
-    private void descompactar(Path arquivoZip) {
-        try (ZipInputStream zis = new ZipInputStream(Files.newInputStream(arquivoZip))) {
-
-            ZipEntry entrada;
-            while ((entrada = zis.getNextEntry()) != null) {
-
-                Path destino = Path.of(DIR_TMP).resolve(entrada.getName()).normalize();
-
-                // Proteção contra "Zip Slip" — impede escrita fora de DIR_TMP
-                if (!destino.startsWith(Path.of(DIR_TMP))) {
-                    throw new RuntimeException("Entrada ZIP inválida (zip slip): " + entrada.getName());
-                }
-
-                if (entrada.isDirectory()) {
-                    Files.createDirectories(destino);
-                } else {
-                    Files.createDirectories(destino.getParent());
-                    try (OutputStream out = Files.newOutputStream(destino)) {
-                        zis.transferTo(out);
-                    }
-                }
-
-                zis.closeEntry();
-            }
-
-        } catch (IOException e) {
-            throw new RuntimeException("Erro ao descompactar: " + arquivoZip, e);
-        }
-    }
-
-    private void deletarArquivo(Path arquivo) {
-        try {
-            Files.deleteIfExists(arquivo);
-        } catch (IOException e) {
-            // Não fatal — apenas loga o aviso e continua
-            System.err.println("Aviso: não foi possível deletar o ZIP: " + arquivo + " — " + e.getMessage());
         }
     }
 }
