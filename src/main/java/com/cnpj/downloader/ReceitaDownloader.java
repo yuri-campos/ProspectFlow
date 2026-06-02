@@ -53,9 +53,12 @@ public class ReceitaDownloader {
                 String urlCompleta = urlMes + nomeArquivo;
                 Path   destino     = Path.of(DIR_TMP + nomeArquivo);
 
-                if (Files.exists(destino) && destino.toFile().length() > 0) {
+                if (Files.exists(destino) && destino.toFile().length() > 0 && zipValido(destino)) {
                     System.out.println("  Já existe, pulando: " + nomeArquivo);
                     continue;
+                } else if (Files.exists(destino)) {
+                    System.out.println("  Arquivo corrompido ou incompleto, baixando novamente: " + nomeArquivo);
+                    destino.toFile().delete();
                 }
                 System.out.println("  Baixando: " + nomeArquivo);
                 baixarArquivo(urlCompleta, destino);
@@ -145,6 +148,20 @@ public class ReceitaDownloader {
         conn.setRequestProperty("User-Agent", "Mozilla/5.0");
 
         return conn;
+    }
+
+    /**
+     * Verifica se o ZIP é válido tentando ler todos os seus entries.
+     * Retorna false se o arquivo estiver corrompido ou incompleto.
+     */
+    private boolean zipValido(Path arquivo) {
+        try (java.util.zip.ZipFile zf = new java.util.zip.ZipFile(arquivo.toFile())) {
+            java.util.Enumeration<? extends java.util.zip.ZipEntry> entries = zf.entries();
+            while (entries.hasMoreElements()) entries.nextElement();
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     private void criarDiretorioTemp() {
