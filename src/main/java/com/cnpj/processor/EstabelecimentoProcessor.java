@@ -23,10 +23,6 @@ import java.util.zip.ZipInputStream;
  *  - Apenas Matrizes (identificador = 1)
  *  - CNAE principal em divisões relevantes (financeiro, varejo, atacado, imobiliário, locação)
  *  - Telefone e e-mail obrigatórios
-<<<<<<< HEAD
- *  - UF diferente de RS e PR
-=======
->>>>>>> feature/filtros-qualidade-credito
  *  - Excluir MEI (natureza jurídica 2135)
  */
 public class EstabelecimentoProcessor {
@@ -58,22 +54,15 @@ public class EstabelecimentoProcessor {
     private static final int EMP_RAZAO_SOCIAL       = 1;
     private static final int EMP_NATUREZA_JURIDICA  = 2;
 
-<<<<<<< HEAD
-    // ── Filtros de negócio ────────────────────────────────────────────────────
-
-    /** UFs excluídas da prospecção. */
-    private static final Set<String> UFS_EXCLUIDAS = new HashSet<>(Arrays.asList("RS", "PR"));
-=======
     // ── índices SOCIOS ───────────────────────────────────────────────────────
-    private static final int SOC_CNPJ_BASICO = 0;
-    private static final int SOC_NOME        = 2;
+    private static final int SOC_CNPJ_BASICO   = 0;
+    private static final int SOC_NOME          = 2;
     private static final int SOC_TOTAL_COLUNAS = 3;
 
     // ── Filtros de negócio ────────────────────────────────────────────────────
 
     /** UFs excluídas da prospecção. */
     private static final Set<String> UFS_EXCLUIDAS = new HashSet<>();
->>>>>>> feature/filtros-qualidade-credito
 
     /** Natureza jurídica do MEI — excluir por baixo potencial comercial. */
     private static final String NATUREZA_MEI = "2135";
