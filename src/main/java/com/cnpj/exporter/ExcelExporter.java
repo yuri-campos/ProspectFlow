@@ -38,14 +38,19 @@ public class ExcelExporter {
     private static final short  TAMANHO_FONTE     = 11;
 
     // ── Labels das colunas ────────────────────────────────────────────────────
-    private static final String[] CABECALHOS = {"CNPJ", "Razão Social", "Telefone", "E-mail"};
+    private static final String[] CABECALHOS = {"CNPJ", "Razão Social", "Telefone", "E-mail", "Estado", "Sócios", "Data de Fundação"};
+
+    private static final DateTimeFormatter FMT_DATA_BR = DateTimeFormatter.ofPattern("dd/MM/yyyy");
 
     // ── Larguras mínimas (em unidades POI = 1/256 de caractere) ──────────────
     private static final int[] LARGURAS_MIN = {
             20 * 256,   // CNPJ formatado tem 18 chars
             45 * 256,   // Razão Social pode ser longa
             20 * 256,   // Telefone
-            35 * 256    // E-mail
+            35 * 256,   // E-mail
+            10 * 256,   // Estado (UF)
+            50 * 256,   // Sócios
+            18 * 256    // Data de Fundação
     };
 
     // ── Formato de datas nos nomes ────────────────────────────────────────────
@@ -98,6 +103,11 @@ public class ExcelExporter {
                 criarCelula(row, 1, nvl(empresa.getRazaoSocial()),      estiloDados);
                 criarCelula(row, 2, nvl(empresa.getTelefone()),         estiloDados);
                 criarCelula(row, 3, nvl(empresa.getEmail()),            estiloDados);
+                criarCelula(row, 4, nvl(empresa.getUf()),               estiloDados);
+                criarCelula(row, 5, nvl(empresa.getSocios()),           estiloDados);
+                String dataFundacao = empresa.getDataAbertura() != null
+                        ? empresa.getDataAbertura().format(FMT_DATA_BR) : "";
+                criarCelula(row, 6, dataFundacao,                       estiloDados);
             }
 
             // ── Largura das colunas ───────────────────────────────────────────

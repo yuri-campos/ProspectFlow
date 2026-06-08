@@ -13,6 +13,8 @@ public class Empresa {
     private String    email;
     private LocalDate dataAbertura;
     private String    situacaoCadastral;
+    private String    uf;
+    private String    socios;
 
     // -----------------------------------------------------------------------
     // Construtores
@@ -80,6 +82,22 @@ public class Empresa {
 
     public void setSituacaoCadastral(String situacaoCadastral) {
         this.situacaoCadastral = situacaoCadastral;
+    }
+
+    public String getUf() {
+        return uf;
+    }
+
+    public void setUf(String uf) {
+        this.uf = uf;
+    }
+
+    public String getSocios() {
+        return socios;
+    }
+
+    public void setSocios(String socios) {
+        this.socios = socios;
     }
 
     // -----------------------------------------------------------------------

@@ -23,7 +23,10 @@ import java.util.zip.ZipInputStream;
  *  - Apenas Matrizes (identificador = 1)
  *  - CNAE principal em divisões relevantes (financeiro, varejo, atacado, imobiliário, locação)
  *  - Telefone e e-mail obrigatórios
+<<<<<<< HEAD
  *  - UF diferente de RS e PR
+=======
+>>>>>>> feature/filtros-qualidade-credito
  *  - Excluir MEI (natureza jurídica 2135)
  */
 public class EstabelecimentoProcessor {
@@ -55,10 +58,22 @@ public class EstabelecimentoProcessor {
     private static final int EMP_RAZAO_SOCIAL       = 1;
     private static final int EMP_NATUREZA_JURIDICA  = 2;
 
+<<<<<<< HEAD
     // ── Filtros de negócio ────────────────────────────────────────────────────
 
     /** UFs excluídas da prospecção. */
     private static final Set<String> UFS_EXCLUIDAS = new HashSet<>(Arrays.asList("RS", "PR"));
+=======
+    // ── índices SOCIOS ───────────────────────────────────────────────────────
+    private static final int SOC_CNPJ_BASICO = 0;
+    private static final int SOC_NOME        = 2;
+    private static final int SOC_TOTAL_COLUNAS = 3;
+
+    // ── Filtros de negócio ────────────────────────────────────────────────────
+
+    /** UFs excluídas da prospecção. */
+    private static final Set<String> UFS_EXCLUIDAS = new HashSet<>();
+>>>>>>> feature/filtros-qualidade-credito
 
     /** Natureza jurídica do MEI — excluir por baixo potencial comercial. */
     private static final String NATUREZA_MEI = "2135";
@@ -93,6 +108,7 @@ public class EstabelecimentoProcessor {
         File dir = new File(dirTemp);
         File[] empresasZips        = listarZips(dir, "Empresas");
         File[] estabelecimentosZips = listarZips(dir, "Estabelecimentos");
+        File[] sociosZips           = listarZipsOpcional(dir, "Socios");
 
         LocalDate hoje   = LocalDate.now();
         LocalDate limite = hoje.minusDays(30);
@@ -136,6 +152,24 @@ public class EstabelecimentoProcessor {
             resultado.addAll(filtrarEstabelecimentos(zip, limite, hoje, razoesSociais, candidatos));
         }
         LOG.info(String.format("  → %,d empresa(s) selecionada(s).", resultado.size()));
+
+        // ── PASSO 4: carregar sócios ──────────────────────────────────────────
+        if (sociosZips.length > 0) {
+            LOG.info("Passo 4/4: carregando sócios...");
+            Set<String> cnpjsFinais = new HashSet<>();
+            for (Empresa e : resultado) cnpjsFinais.add(e.getCnpj().replaceAll("[^0-9]", "").substring(0, 8));
+            Map<String, List<String>> socios = new HashMap<>();
+            for (File zip : sociosZips) {
+                LOG.info("  Lendo: " + zip.getName());
+                carregarSocios(zip, cnpjsFinais, socios);
+            }
+            for (Empresa e : resultado) {
+                String cnpjBasico = e.getCnpj().replaceAll("[^0-9]", "").substring(0, 8);
+                List<String> nomes = socios.getOrDefault(cnpjBasico, Collections.emptyList());
+                e.setSocios(String.join(", ", nomes));
+            }
+            LOG.info(String.format("  → sócios carregados para %,d empresa(s).", socios.size()));
+        }
 
         return resultado;
     }
@@ -265,6 +299,7 @@ public class EstabelecimentoProcessor {
                 empresa.setEmail(email);
                 empresa.setDataAbertura(dataInicio);
                 empresa.setSituacaoCadastral(limpar(c[EST_SITUACAO]));
+                empresa.setUf(limpar(c[EST_UF]));
 
                 empresas.add(empresa);
             }
@@ -282,6 +317,31 @@ public class EstabelecimentoProcessor {
             throw new IOException("Nenhum arquivo " + prefixo + "*.zip encontrado em: " + dir);
         Arrays.sort(zips);
         return zips;
+    }
+
+    private File[] listarZipsOpcional(File dir, String prefixo) {
+        File[] zips = dir.listFiles((d, name) -> name.startsWith(prefixo) && name.endsWith(".zip"));
+        if (zips == null) return new File[0];
+        Arrays.sort(zips);
+        return zips;
+    }
+
+    private void carregarSocios(File zip, Set<String> cnpjsAlvo,
+                                 Map<String, List<String>> socios) throws IOException {
+        try (ZipInputStream zis = abrirZip(zip);
+             BufferedReader br  = new BufferedReader(new InputStreamReader(zis, CHARSET), 1 << 16)) {
+            String linha;
+            while ((linha = br.readLine()) != null) {
+                String[] c = linha.split(SEPARADOR, -1);
+                if (c.length < SOC_TOTAL_COLUNAS) continue;
+                String cnpjBasico = limpar(c[SOC_CNPJ_BASICO]);
+                if (!cnpjsAlvo.contains(cnpjBasico)) continue;
+                String nome = limpar(c[SOC_NOME]);
+                if (!nome.isEmpty()) {
+                    socios.computeIfAbsent(cnpjBasico, k -> new ArrayList<>()).add(nome);
+                }
+            }
+        }
     }
 
     private ZipInputStream abrirZip(File zip) throws IOException {
