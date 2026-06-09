@@ -1,64 +1,58 @@
-ProspectFlow
-Gerador automático de leads qualificados a partir dos Dados Abertos da Receita Federal.
-Toda semana, o pipeline baixa o dump mais recente de CNPJs, filtra empresas recém-abertas com alto potencial de contratar soluções de análise de crédito e exporta uma planilha .xlsx pronta para prospecção.
+ProspectFlow — Gerador de Leads por CNPJ
+O que é
+Ferramenta que baixa os Dados Abertos de CNPJ da Receita Federal e gera planilhas Excel mensais com empresas recém-abertas que têm alto potencial de contratar soluções de análise de crédito.
 
 Como funciona
+Download — Baixa os arquivos ZIP do dump mais recente da Receita Federal (WebDAV autenticado)
+Filtragem — Para cada mês do período configurado, seleciona apenas empresas que atendem todos os critérios abaixo
+Deduplicação — Garante que nenhuma empresa apareça em mais de uma planilha
+Exportação — Gera um .xlsx por mês em output/
+Filtros aplicados
+Critério	Valor
+Data de abertura	Dentro do mês alvo
+Situação cadastral	Ativa (02)
+Tipo	Apenas matrizes
+CNAE	Divisões 45, 46, 47, 64, 65, 66, 68, 77
+Contato	Telefone e e-mail obrigatórios
+Excluídos	MEI (natureza jurídica 2135)
+Divisões CNAE alvo: veículos, atacado, varejo, serviços financeiros, seguros, atividades auxiliares financeiras, imobiliário, locação.
 
-Download — baixa os ZIPs de Estabelecimentos, Empresas e Sócios diretamente do portal de Dados Abertos da Receita Federal.
-Filtragem — aplica os seguintes critérios:
+Saída
+Arquivos gerados em output/:
 
-Data de abertura dentro do mês corrente
-Situação cadastral Ativa (02)
-Apenas Matrizes
-CNAE principal em divisões-alvo (financeiro, varejo, atacado, imobiliário, locação de veículos)
-Telefone e e-mail presentes
-Excluir MEI (natureza jurídica 2135)
+output/empresas_2026-01.xlsx
+output/empresas_2026-02.xlsx
+output/empresas_2026-03.xlsx
+...
+Cada planilha contém as colunas: CNPJ · Razão Social · Telefone · E-mail · Estado · Sócios · Data de Fundação
 
+Como executar
+Pré-requisitos: Java 17+, Maven 3.x
 
-Deduplicação — empresas já vistas em execuções anteriores são removidas via data/cnpjs_vistos.csv.
-Exportação — gera output/empresas_<AAAA-MM>.xlsx com CNPJ, razão social, telefone, e-mail, data de abertura, UF e sócios.
+# 1. Compilar
+mvn package -q
 
-Divisões CNAE monitoradas
-DivisãoDescrição45Comércio e reparação de veículos46Comércio atacadista47Comércio varejista64Serviços financeiros (bancos, fintechs, cooperativas)65Seguros e previdência66Atividades auxiliares financeiras (factoring, securitizadoras)68Atividades imobiliárias77Locação de veículos e equipamentos
-
+# 2. Rodar (recomendado 6 GB de heap por causa dos ZIPs pesados)
+java -Xmx6g -jar target/cnpj-semanal.jar
 Estrutura do projeto
 ProspectFlow/
-├── src/main/java/com/cnpj/
-│   ├── Main.java                        # Orquestrador principal
-│   ├── downloader/ReceitaDownloader.java  # Download dos ZIPs da Receita Federal
-│   ├── processor/EstabelecimentoProcessor.java  # Leitura e filtragem
-│   ├── deduplicator/Deduplicator.java   # Controle de CNPJs já vistos
-│   ├── exporter/ExcelExporter.java      # Geração do XLSX
-│   └── model/Empresa.java               # Modelo de dados
 ├── data/
-│   └── cnpjs_vistos.csv                 # Histórico de CNPJs já exportados
-├── output/
-│   └── empresas_<AAAA-MM>.xlsx          # Planilha gerada
-├── .github/workflows/semanal.yml        # Automação semanal via GitHub Actions
+│   └── cnpjs_vistos.csv        # histórico de deduplicação
+├── output/                     # planilhas geradas
+├── src/main/java/com/cnpj/
+│   ├── Main.java
+│   ├── downloader/             # download dos ZIPs da Receita
+│   ├── processor/              # leitura, filtragem e montagem das empresas
+│   ├── deduplicator/           # controle de CNPJs já processados
+│   ├── exporter/               # geração do Excel
+│   └── model/                  # classe Empresa
 └── pom.xml
+Fonte dos dados
+Dados Abertos CNPJ — Receita Federal
+Atualização mensal. Token de acesso público permanente (YggdBLfdninEJX9).
 
-Execução local
-Pré-requisitos: Java 17+ e Maven 3.8+
-bash# Compilar e gerar fat JAR
-mvn package
+Zerando o histórico
+Para reprocessar tudo do zero, limpe o arquivo de deduplicação antes de rodar:
 
-# Executar (recomendado: heap generoso por causa dos dumps da Receita)
-java -Xmx6g -jar target/cnpj-semanal.jar
-O arquivo .xlsx será gerado em output/.
-
-Automação (GitHub Actions)
-O workflow .github/workflows/semanal.yml roda toda segunda-feira às 08:00 UTC. Ele também pode ser disparado manualmente pela UI do GitHub em Actions → Run workflow.
-Ao final de cada execução:
-
-O .xlsx fica disponível como artefato de build por 30 dias.
-O data/cnpjs_vistos.csv atualizado é commitado de volta ao repositório (somente se houver novos CNPJs).
-
-
-Tecnologias
-
-Java 17
-Apache POI 5.2.5 — geração do .xlsx
-Apache Commons CSV 1.11.0 — leitura dos CSVs da Receita Federal
-Apache HttpClient 5.3.1 — download dos ZIPs
-Logback — logging
-Maven Assembly Plugin — fat JAR executável
+# Windows (PowerShell)
+Set-Content -Path "data\cnpjs_vistos.csv" -Value "cnpj,data_primeira_vez" -Encoding utf8
