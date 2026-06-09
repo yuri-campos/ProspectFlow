@@ -58,7 +58,7 @@ public class ExcelExporter {
     private static final DateTimeFormatter FMT_ARQUIVO     = DateTimeFormatter.ofPattern("yyyy-MM-dd");
     private static final DateTimeFormatter FMT_ARQUIVO_MES = DateTimeFormatter.ofPattern("yyyy-MM");
     private static final DateTimeFormatter FMT_ABA         = DateTimeFormatter.ofPattern("dd-MM-yyyy");
-    private static final DateTimeFormatter FMT_ABA_MES     = DateTimeFormatter.ofPattern("MM/yyyy");
+    private static final DateTimeFormatter FMT_ABA_MES     = DateTimeFormatter.ofPattern("MM-yyyy");
 
     private static final Path DIRETORIO_SAIDA = Paths.get("output");
 

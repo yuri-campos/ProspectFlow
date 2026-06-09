@@ -1,0 +1,13 @@
+# Dados temporários da Receita (podem ter GBs)
+target/data/
+
+# Planilhas geradas
+output/
+
+# Maven
+target/
+
+# IDEs
+.idea/
+*.iml
+.vscode/
