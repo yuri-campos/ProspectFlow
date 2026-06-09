@@ -7,43 +7,51 @@ import com.cnpj.exporter.ExcelExporter;
 import com.cnpj.model.Empresa;
 
 import java.nio.file.Paths;
+import java.time.YearMonth;
 import java.util.List;
 
 public class Main {
 
     public static void main(String[] args) throws Exception {
 
-        System.out.println("=== Iniciando processamento semanal de CNPJs ===");
+        System.out.println("=== Iniciando processamento histórico de CNPJs (Jan–" + YearMonth.now() + ") ===");
 
-        // PASSO 1 — Download dos arquivos ZIP da Receita Federal
+        // PASSO 1 — Download do dump mais recente da Receita Federal
         ReceitaDownloader downloader = new ReceitaDownloader();
-        System.out.println("[1/5] Baixando arquivos ZIP da Receita Federal...");
+        System.out.println("[1/N] Baixando arquivos ZIP da Receita Federal...");
         downloader.baixar();
-        System.out.println("      Download concluído.");
+        System.out.println("      Download concluído. Base: " + downloader.getMesRecente());
 
-        // PASSO 2 — Leitura e filtragem dos estabelecimentos
         EstabelecimentoProcessor processor = new EstabelecimentoProcessor();
-        System.out.println("[2/5] Lendo e filtrando estabelecimentos...");
-        List<Empresa> empresas = processor.processar(downloader.getDirTemp());
-        System.out.println("      " + empresas.size() + " empresa(s) lida(s) após filtragem.");
-
-        // PASSO 3 — Deduplicação
         Deduplicator deduplicator = new Deduplicator(Paths.get("data", "cnpjs_vistos.csv"));
-        System.out.println("[3/5] Removendo CNPJs já processados anteriormente...");
-        List<Empresa> empresasNovas = deduplicator.filtrar(empresas);
-        System.out.println("      " + empresasNovas.size() + " empresa(s) nova(s) após deduplicação.");
-
-        // PASSO 4 — Exportação para XLSX
         ExcelExporter exporter = new ExcelExporter();
-        System.out.println("[4/5] Exportando resultado para XLSX...");
-        exporter.exportar(empresasNovas);
-        System.out.println("      Arquivo XLSX gerado com sucesso.");
 
-        // PASSO 5 — Atualização do histórico
-        System.out.println("[5/5] Atualizando histórico de CNPJs processados...");
-        deduplicator.salvarNovos(empresasNovas);
-        System.out.println("      Histórico atualizado.");
+        YearMonth inicio = YearMonth.of(2026, 1);
+        YearMonth fim    = YearMonth.now();
 
-        System.out.println("=== Processamento semanal concluído com sucesso! ===");
+        int etapa = 2;
+        for (YearMonth mes = inicio; !mes.isAfter(fim); mes = mes.plusMonths(1)) {
+
+            System.out.println();
+            System.out.println("[" + etapa++ + "] Processando mês: " + mes);
+
+            // Leitura e filtragem para o mês específico
+            List<Empresa> empresas = processor.processar(downloader.getDirTemp(), mes);
+            System.out.println("      " + empresas.size() + " empresa(s) lida(s) após filtragem.");
+
+            // Deduplicação
+            List<Empresa> empresasNovas = deduplicator.filtrar(empresas);
+            System.out.println("      " + empresasNovas.size() + " empresa(s) nova(s) após deduplicação.");
+
+            // Exportação mensal
+            exporter.exportar(empresasNovas, mes);
+            System.out.println("      Arquivo XLSX gerado: empresas_" + mes + ".xlsx");
+
+            // Atualização do histórico
+            deduplicator.salvarNovos(empresasNovas);
+        }
+
+        System.out.println();
+        System.out.println("=== Processamento histórico concluído com sucesso! ===");
     }
 }

@@ -5,6 +5,7 @@ import com.cnpj.model.Empresa;
 import java.io.*;
 import java.nio.charset.Charset;
 import java.time.LocalDate;
+import java.time.YearMonth;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.*;
@@ -93,15 +94,21 @@ public class EstabelecimentoProcessor {
     // ─────────────────────────────────────────────────────────────────────────
 
     public List<Empresa> processar(String dirTemp) throws IOException {
+        return processar(dirTemp, null);
+    }
+
+    public List<Empresa> processar(String dirTemp, YearMonth mesDump) throws IOException {
 
         File dir = new File(dirTemp);
         File[] empresasZips        = listarZips(dir, "Empresas");
         File[] estabelecimentosZips = listarZips(dir, "Estabelecimentos");
         File[] sociosZips           = listarZipsOpcional(dir, "Socios");
 
-        LocalDate hoje   = LocalDate.now();
-        LocalDate limite = hoje.minusDays(30);
-        LOG.info(String.format("Janela de filtro: %s a %s", limite, hoje));
+        // Filtra empresas abertas dentro do mês alvo (ou mês atual se não informado).
+        YearMonth mesAlvo = (mesDump != null) ? mesDump : YearMonth.now();
+        LocalDate limite  = mesAlvo.atDay(1);
+        LocalDate hoje    = mesAlvo.atEndOfMonth();
+        LOG.info(String.format("Janela de filtro: %s a %s (mês %s)", limite, hoje, mesAlvo));
 
         // ── PASSO 1: coletar CNPJ básicos candidatos ──────────────────────────
         LOG.info("Passo 1/3: coletando CNPJ básicos candidatos...");

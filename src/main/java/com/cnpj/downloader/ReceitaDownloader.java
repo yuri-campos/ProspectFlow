@@ -21,11 +21,14 @@ public class ReceitaDownloader {
 
     private static final Logger LOG = Logger.getLogger(ReceitaDownloader.class.getName());
 
+    private String mesRecente;
+
     private static final String BASE_URL    = "https://arquivos.receitafederal.gov.br/public.php/webdav/";
     private static final String SHARE_TOKEN = "YggdBLfdninEJX9";
 
     private static final String PREFIXO_EMPRESAS         = "Empresas";
     private static final String PREFIXO_ESTABELECIMENTOS = "Estabelecimentos";
+    private static final String PREFIXO_SOCIOS           = "Socios";
     private static final int    INDICE_INICIAL            = 0;
     private static final int    INDICE_FINAL              = 9;
 
@@ -41,13 +44,13 @@ public class ReceitaDownloader {
     public void baixar() {
         criarDiretorioTemp();
 
-        String mesRecente = descobrirMesRecente();
+        mesRecente = descobrirMesRecente();
         LOG.info("Mês mais recente disponível: " + mesRecente);
         System.out.println("  Usando base de dados de: " + mesRecente);
 
         String urlMes = BASE_URL + mesRecente + "/";
 
-        for (String prefixo : new String[]{PREFIXO_EMPRESAS, PREFIXO_ESTABELECIMENTOS}) {
+        for (String prefixo : new String[]{PREFIXO_EMPRESAS, PREFIXO_ESTABELECIMENTOS, PREFIXO_SOCIOS}) {
             for (int i = INDICE_INICIAL; i <= INDICE_FINAL; i++) {
                 String nomeArquivo = prefixo + i + ".zip";
                 String urlCompleta = urlMes + nomeArquivo;
@@ -69,6 +72,10 @@ public class ReceitaDownloader {
 
     public String getDirTemp() {
         return DIR_TMP;
+    }
+
+    public String getMesRecente() {
+        return mesRecente;
     }
 
     // ─────────────────────────────────────────────────────────────────────────

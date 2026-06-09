@@ -7,6 +7,7 @@ import org.apache.poi.xssf.usermodel.*;
 import java.io.*;
 import java.nio.file.*;
 import java.time.LocalDate;
+import java.time.YearMonth;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.logging.Logger;
@@ -54,8 +55,10 @@ public class ExcelExporter {
     };
 
     // ── Formato de datas nos nomes ────────────────────────────────────────────
-    private static final DateTimeFormatter FMT_ARQUIVO = DateTimeFormatter.ofPattern("yyyy-MM-dd");
-    private static final DateTimeFormatter FMT_ABA     = DateTimeFormatter.ofPattern("dd-MM-yyyy");
+    private static final DateTimeFormatter FMT_ARQUIVO     = DateTimeFormatter.ofPattern("yyyy-MM-dd");
+    private static final DateTimeFormatter FMT_ARQUIVO_MES = DateTimeFormatter.ofPattern("yyyy-MM");
+    private static final DateTimeFormatter FMT_ABA         = DateTimeFormatter.ofPattern("dd-MM-yyyy");
+    private static final DateTimeFormatter FMT_ABA_MES     = DateTimeFormatter.ofPattern("MM/yyyy");
 
     private static final Path DIRETORIO_SAIDA = Paths.get("output");
 
@@ -69,8 +72,11 @@ public class ExcelExporter {
      * @throws IOException em caso de falha de escrita
      */
     public Path exportar(List<Empresa> empresas) throws IOException {
-        LocalDate hoje    = LocalDate.now();
-        Path arquivoSaida = resolverCaminhoSaida(hoje);
+        return exportar(empresas, null);
+    }
+
+    public Path exportar(List<Empresa> empresas, YearMonth mes) throws IOException {
+        Path arquivoSaida = mes != null ? resolverCaminhoSaidaMes(mes) : resolverCaminhoSaida(LocalDate.now());
 
         LOG.info(String.format("Gerando Excel: %s (%,d registros)…", arquivoSaida, empresas.size()));
 
@@ -79,7 +85,9 @@ public class ExcelExporter {
         try (XSSFWorkbook workbook = new XSSFWorkbook()) {
 
             // ── Criar aba ─────────────────────────────────────────────────────
-            String nomeAba = "Empresas Semana " + hoje.format(FMT_ABA);
+            String nomeAba = mes != null
+                    ? "Empresas " + mes.format(FMT_ABA_MES)
+                    : "Empresas Semana " + LocalDate.now().format(FMT_ABA);
             XSSFSheet sheet = workbook.createSheet(nomeAba);
 
             // ── Estilos ───────────────────────────────────────────────────────
@@ -230,6 +238,11 @@ public class ExcelExporter {
 
     private Path resolverCaminhoSaida(LocalDate data) {
         String nomeArquivo = "empresas_" + data.format(FMT_ARQUIVO) + ".xlsx";
+        return DIRETORIO_SAIDA.resolve(nomeArquivo);
+    }
+
+    private Path resolverCaminhoSaidaMes(YearMonth mes) {
+        String nomeArquivo = "empresas_" + mes.format(FMT_ARQUIVO_MES) + ".xlsx";
         return DIRETORIO_SAIDA.resolve(nomeArquivo);
     }
 
